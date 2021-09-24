@@ -1,0 +1,130 @@
+## ServiceManager和Zytoge
+
+serviceManager的功能是提供binder通讯服务
+
+Zygote的功能是创建java进程
+
+在ServiceManager启动后启动Zytoge，Zytoge会创建Systemserver线程。
+
+
+
+## SystemServer -- Java进程启动的源头
+
+- SystemServer是系统服务，它是系统启动时调用的程序，由Native层调用并启动；SystemServer启动后创建并初始化其他manager和server。
+
+##### main()
+
+- SystemServer中的main()方法只有一条：
+
+  ```Java
+  	public static void main(String[] args) {
+          //表明SystemServer是运行在一个独立的线程中
+          new SystemServer().run();
+      }
+  ```
+
+##### run()方法
+
+1. 设置启动的初始信息：启动时间、关机延迟、系统时间、时区、系统语言、非单项服务、启用安全设置、设置默认值、禁用数据库等等
+
+   ```Java
+   if (System.currentTimeMillis() < EARLIEST_SUPPORTED_TIME) {
+       Slog.w(TAG, "System clock is before 1970; setting to 1970.");
+       SystemClock.setCurrentTimeMillis(EARLIEST_SUPPORTED_TIME);
+       //设置系统时间最早为1970，因为早于这个时间将有很多API无法使用
+   }
+   ```
+
+2. 进入Systemserver：
+
+   - 重新设置时间
+
+   - 保持Systemserver始终运行、定义指纹生成、指定用户
+
+     ```Java
+      VMRuntime.getRuntime().setTargetHeapUtilization(0.8f);
+      Build.ensureFingerprintProperty();
+     ```
+
+   - 设置Bundle、堆栈、Binder属性，以保证SystemServer可以正常运行
+
+   - 加载本地库
+
+3. 检测上次shutdown是是否失败，是的话重新启动
+
+   ```java
+   performPendingShutdown();
+   private void performPendingShutdown() {
+       ...;
+       if (shutdownAction != null && shutdownAction.length() > 0) {
+           ...;
+           Runnable runnable = new Runnable() {
+               @Override
+               public void run() {
+                   synchronized (this) {
+                       ShutdownThread.rebootOrShutdown(null, reboot, reason);
+                   }
+               }
+           };
+           ...;
+       }
+   }
+   ```
+
+4. 创建SystemContext并设置SystemUiContext的主题
+
+   ```Java
+   createSystemContext();
+   private void createSystemContext() {
+       ActivityThread activityThread = ActivityThread.systemMain();
+       mSystemContext = activityThread.getSystemContext();
+       mSystemContext.setTheme(DEFAULT_SYSTEM_THEME);
+   
+       final Context systemUiContext = activityThread.getSystemUiContext();
+       systemUiContext.setTheme(DEFAULT_SYSTEM_THEME);
+   }
+   ```
+
+5. 创建并初始化SystemServerManager，把SystemServerManager加入到本地服务
+
+   ```Java
+   mSystemServiceManager = new SystemServiceManager(mSystemContext);
+   ```
+
+6. start system servicce，这是SystemServer的核心功能
+
+   ```Java
+   startBootstrapServices(){ //1、启动引导服务，包括看门狗、各种ManagerService、启动各种初始service等等。
+       ...
+       ActivityTaskManagerService atm = mSystemServiceManager.startService(
+           ActivityTaskManagerService.Lifecycle.class).getService();
+       mActivityManagerService = ActivityManagerService.Lifecycle.startService(mSystemServiceManager, atm);
+       mPowerManagerService = mSystemServiceManager.startService(PowerManagerService.class);
+       mPackageManagerService = PackageManagerService.main(mSystemContext, installer,
+           mFactoryTestMode != FactoryTest.FACTORY_TEST_OFF, mOnlyCore);
+       mDisplayManagerService = mSystemServiceManager.startService(DisplayManagerService.class);
+       ...
+   }
+   
+   startCoreServices(){ //2、启动各种核心服务：Battery、Web、Binder、RollbackManager、BugreportManager等
+   	mWebViewUpdateService = mSystemServiceManager.startService(WebViewUpdateService.class);
+   }
+   
+   startOtherServices(){  //3、启动一些其他必要的功能模块服务：通信、账户、SystemProviders、输入、windows、蓝牙、网络、位置、媒体等等
+   	networkManagement = NetworkManagementService.create(context);
+       wm = WindowManagerService.main(context, inputManager, !mFirstBoot, mOnlyCore,
+                       new PhoneWindowManager(), mActivityManagerService.mActivityTaskManager);
+       inputManager = new InputManagerService(context);
+   }
+   ```
+
+7. 在startOtherServices()方法的最后，会调用mActivityManagerService.systemReady()方法
+
+   ```Java
+   mActivityManagerService.systemReady(() -> {...})
+   //包含webUI、车载服务、SystemUI、飞行模式、网络、IP、通信、防火墙、地址、输入、媒体等模块的准备和启动
+   ```
+
+8. 关闭StrictMode
+
+9. 长时间未启动成功处理
