@@ -136,3 +136,8 @@ emulator
 - 执行idegen文件：`development/tools/idegen/idegen.sh`
 - 会生成android.iml和android.ipr文件，android.iml里面记录了项目包含的moudel、依赖关系等；通过导入android.ipr文件来查看阅读源码
 
+
+
+# 查看UI
+
+hierarchyviewer
