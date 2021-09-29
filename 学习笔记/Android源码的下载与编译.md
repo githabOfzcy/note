@@ -141,3 +141,16 @@ emulator
 # 查看UI
 
 hierarchyviewer
+
+
+
+
+
+```
+aapt p -f -I [ANDROID_SDK_PATH]/android.jar \
+    -S [OVERLAY_PATH]/res \
+    -M [OVERLAY_PATH]/AndroidManifest.xml \
+    -c [PRODUCT_AAPT_CONFIG] \
+    -F [MODULE_NAME]-overlay.apk
+```
+
