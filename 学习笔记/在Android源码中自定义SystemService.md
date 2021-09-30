@@ -106,6 +106,8 @@
 
 ### 4.创建MyService的管理类
 
+- 该管理类将service 封装起来，方便调用者操作；添加在frameworks/base/core/java/android/app/MyServiceManager.java
+
 - ```java
   package android.app;
   import android.content.Context;
@@ -152,5 +154,37 @@
   }
   ```
 
-  
+
+### 5.注册服务
+
+- 将服务注册在SystemServiceRegistry中，这样我们就可以通过getSystemService来获取
+
+- frameworks/base/core/java/android/app/SystemServiceRegistry.java
+
+- ```java
+  final class SystemServiceRegistry {
+      ...;
+      static {
+          ...;
+          //myService
+          registerService(Context.MY_SERVICE, MyServiceManager.class,
+                  new CachedServiceFetcher<MyServiceManager>() {
+                      @Override
+                      public MyServiceManager createService(ContextImpl ctx) {
+                          //通过服务名称获取其binder
+                          IBinder b = ServiceManager.getService(Context.MY_SERVICE);
+                          //将binder转为接口对象，传递给manager管理
+                          IMyService service = IMyService.Stub.asInterface(b);
+                          return new MyServiceManager(ctx,service);
+                      }});
+          ...;
+      }
+      ...;
+  }
+  ```
+
+### 6.编译
+
+- 先使用 `make update-api`命令更新API
+- 再使用 `make`命令编译
 

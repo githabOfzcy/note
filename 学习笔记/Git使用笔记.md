@@ -87,6 +87,8 @@ graph TD
 #### 其他命令
 
 - 查看GIT版本：`git --version`
+- 生成patch：`git format-patch -1`
+- 打patch：`git apply xx.patch `
 
 ## 关于repo
 
