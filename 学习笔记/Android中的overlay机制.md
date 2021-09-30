@@ -36,3 +36,52 @@
 
 ## RRO
 
+- Runtime Resource Overlay运行时资源替换
+
+- 实现方式
+
+  1. 知道要替换的资源的包名和资源名
+
+  2. 建立overlay项目结构：
+
+     ```java
+     overlay
+         |---res
+         |    |---drawable
+         |    |      |---ic_qs_airplane.xml
+         |    |---values
+         |---Android.mk
+         |---AndroidManifest.xml
+     ```
+
+     整体来说比较简单，在res目录下放入同名（路径不需要相同）的资源文件即可
+
+  3. 编写AndroidManifest.xml文件
+
+     ```java
+     <manifest xmlns:android="http://schemas.android.com/apk/res/android"   固定的
+         package="com.android.iconairplane"         当前包名，随便写
+         android:versionCode="1"
+         android:versionName="1.0">
+         <overlay android:targetPackage="com.android.theme.systemui"     overlay目标的包名
+                 android:priority="1"/>                                  优先级（1-999）
+     <application android:hasCode="false"/>         固定的
+     </manifest>
+     
+     ```
+
+  4. 编写Android.mk文件
+
+     ```java
+     LOCAL_PATH:= $(call my-dir)							当前路径
+     include $(CLEAR_VARS)								清除之前的变量配置
+     LOCAL_RRO_THEME := IconAirplane						编译生成文件的文件夹
+     LOCAL_PRODUCT_MODULE := true						编译生成文件是否在product目录下
+     LOCAL_SRC_FILES := $(call all-subdir-java-files)	编译生成文件是.apk形式
+     LOCAL_RESOURCE_DIR := $(LOCAL_PATH)/res				资源文件路径
+     LOCAL_PACKAGE_NAME := IconAirplaneOverlay			编译生成文件名称
+     LOCAL_SDK_VERSION := current						编译使用的sdk
+     include $(BUILD_RRO_PACKAGE)
+     ```
+
+  5. 模块编译，把生成的apk用adb install命令放进模拟器里。
