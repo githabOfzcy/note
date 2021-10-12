@@ -133,8 +133,11 @@ emulator
 # 把源码导入AS
 
 - 执行source命令：`. build/envsetup.sh`
+- 选择分支：`lunch xx`
+- 编译idegn模块：`mmm development/tools/idegen`
 - 执行idegen文件：`development/tools/idegen/idegen.sh`
-- 会生成android.iml和android.ipr文件，android.iml里面记录了项目包含的moudel、依赖关系等；通过导入android.ipr文件来查看阅读源码
+- 会生成android.iml和android.ipr文件，android.iml里面记录了项目包含的moudel、依赖关系等
+- 需要用as查看调试哪一部分的源码，就把android.iml和android.ipr文件复制到哪一部分，然后用as打开android.ipr即可查看并调试。
 
 
 

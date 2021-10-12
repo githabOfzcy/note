@@ -341,3 +341,75 @@ classDiagram
 
 
 # 单例模式
+
+**单例模式确保一个类只有一个实例，并提供一个全局访问点**
+
+- 需要获得单例类的实例时，只能通过单例类来获得
+- 提供对这个实例的全局访问点
+
+```mermaid
+classDiagram
+	class Singleton{
+		static uniqueInstance
+		static getInstance()
+	}
+```
+
+**在单线程时**，只需要将构造器设置为私有并提供getInstance方法即可
+
+```java
+public class Singleton{
+    private Singleton(){}
+    private static Singleton uniqueInstance;
+    public static Singleton getInstance(){
+        if(uniqueInstance == null){
+            uniqueInstance = new Singleton;
+        }
+        return uniqueInstance;
+    }
+}
+```
+
+但上面的代码在多线程时，可能发生这种情况：
+
+- 两个线程同时调用getInstance()方法，这个时候两个线程获得在进行`uniqueInstance == null`判断时都为true，因此可能会造成出现两个实例！
+
+## 解决单例模式的线程安全问题
+
+### 一、使用预加载而不是懒加载
+
+```java
+public class Singleton{
+    private Singleton(){}
+    private static Singleton uniqueInstance = new Singleton;
+    public static Singleton getInstance(){
+        return uniqueInstance;
+    }
+}
+```
+
+这样使得在JVM加载这个类时就创建这个对象，保证了对象的唯一
+
+### 二、使用双重检查加锁
+
+```java
+public class Singleton{
+    private Singleton(){}
+    private volatile Singleton uniqueInstance;
+    public static Singleton getInstance(){
+        if(uniqueInstance == null){
+            synchronized(Singleton.class){
+                if(uniqueInstance == null){
+                    uniqueInstance = new Singleton;
+                }
+            }
+        }
+        return uniqueInstance;
+    }
+}
+```
+
+注意：如果使用多个类加载器（classloader），那么有可能造成同一个类被加载了多次；可以通过指定类加载器来避免这个问题
+
+- 不要滥用单例模式
+
