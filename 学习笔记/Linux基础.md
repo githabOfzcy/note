@@ -122,7 +122,6 @@
   - mkdir -p /xx/xxx.xx
 - 删除目录：rmdir
   - rmdir xxx         删除空目录
-  - rmdir -rf xxx        删除非空目录
 - 创建空文件：touch
   - touch xxx.xx yyy.yy zzz.zz
 - 拷贝文件：cp

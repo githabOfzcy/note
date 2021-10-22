@@ -33,6 +33,7 @@
 - 选择分支：`repo init -u https://mirrors.tuna.tsinghua.edu.cn/git/AOSP/platform/manifest -b android-10.0.0_r47`
 - 同步：`repo sync --no-tags -cd -j4`
 
+- 注意：如果出现“A new version of repo is available”可以尝试删除~/.repoconfig文件。`rm -rf ~/.repoconfig`
 
 
 # 全编译
