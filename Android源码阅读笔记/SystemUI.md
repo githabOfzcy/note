@@ -123,3 +123,54 @@ frameworks/base/packages/SystemUI/res/values/config.xml
 ##### 2.3.相关服务的start()方法
 
 2.3.1.NotificationChannels
+
+###### 2.3.1.NotificationChannels
+
+- 对应通知，主要用来创建并初始化各类型的通知，以便systemui组件调用。
+
+```java
+public void start() {
+    createAll(mContext);
+}
+public static void createAll(Context context) {
+    //创建NotificationManager的对象，NotificationManager定义在frameworks/case/core/java/android/app/下
+    final NotificationManager nm = context.getSystemService(NotificationManager.class);
+    //创建电池通知，NotificationChannel也定义在frameworks/case/core/java/android/app/下
+    final NotificationChannel batteryChannel = new NotificationChannel(...
+                             NotificationManager.IMPORTANCE_MAX);//电池通知的级别为5，最高级别。
+    final String soundPath = Settings.Global.getString(...);//电池通知的声音存储路径
+    batteryChannel.setSound(...);//设置声音
+    batteryChannel.setBlockable(true);//设置锁屏时可进行通知
+    //创建警报通知，级别为4；一般用于确认操作，比如删除APP、下载APP等
+    final NotificationChannel alerts = new NotificationChannel(...);
+    //创建普通通知，级别为1；锁屏界面的通知。
+    final NotificationChannel general = new NotificationChannel(...);
+    //创建storage通知，当应用于电视时级别为3，否则为2
+    final NotificationChannel storage = new NotificationChannel(...);
+    //创建hint通知，级别为3
+    final NotificationChannel hint = new NotificationChannel(...);
+    //将这些通知纳入NotificationManager的管理，后续可以通过NotificationManager来获取并使用这些通知。
+    nm.createNotificationChannels(Arrays.asList(
+        alerts,general,storage,
+        createScreenshotChannel(//额外增加屏幕截图的通知，但在Android P 中已经移除了。
+            context.getString(R.string.notification_channel_screenshot),
+            nm.getNotificationChannel(SCREENSHOTS_LEGACY)),
+        batteryChannel,hint
+    ));}
+```
+
+###### 2.3.2.KeyguardViewMediator
+
+- 对应锁屏界面，初始化并设置锁屏的各种属性：锁屏广播、锁屏延迟、时间、锁屏声音、解锁声音等等。
+
+###### 2.3.3.Recents
+
+- 对应近期任务界面
+
+###### 2.3.4.VolumeUI
+
+- 对应音量调节对话框
+
+###### 2.3.5.StatusBar
+
+- 对应屏幕上方的状态栏，在start()方法中初始化了屏幕生命周期的观察者、WindowManager、DreamManager、display、controller等。
