@@ -398,6 +398,27 @@ keyguard界面各个View的代码位于frameworks/base/packages/SystemUI/src/com
 
 锁屏状态下的通知显示、状态栏变更等的代码位于frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone下。
 
+##### 1.4.生命周期
+
+keyguard的生命周期可以从KeyguardService中看到，主要包含以下几个生命周期：
+
+```java
+public void onSystemReady() {}//开机时系统准备就绪
+
+public void onDreamingStarted() {}//屏保开始
+public void onDreamingStopped() {}//屏保结束
+
+public void onStartedWakingUp() {}//开始唤醒
+public void onFinishedWakingUp() {}//完成唤醒
+public void onScreenTurningOn() {}//开始亮屏
+public void onScreenTurnedOn() {}//完成亮屏
+
+public void onStartedGoingToSleep() {}//开始进入睡眠
+public void onFinishedGoingToSleep() {}//完成进入睡眠
+public void onScreenTurningOff() {}//开始息屏
+public void onScreenTurnedOff() {}//完成息屏
+```
+
 #### 2.keyguard的主要界面介绍
 
 ##### 2.1.keyguard界面
@@ -408,9 +429,11 @@ keyguard界面各个View的代码位于frameworks/base/packages/SystemUI/src/com
 ##### 3.2.bouncer界面
 
 - 也就是输密码的界面，keyguard界面上滑进入bouncer界面
-- 由KeyguardBouncer控制，在KeyguardSecurityContainerController中生成view界面
+- 由KeyguardBouncer控制，在KeyguardSecurityContainer中生成Bouncer界面
 
 #### 3.keyguard的开机启动流程
+
+- 开机启动时，keyguard主要进行onSystemReady的生命周期
 
 ##### 3.1.KeyguardViewMediator.start()
 
@@ -561,5 +584,199 @@ private void onFinishInflate() {
 }
 ```
 
-#### 4.keyguard的解锁流程
+##### 3.6.KeyguardBouncer.prepare()
+
+- 在这里进行bouncer的初始化
+
+```java
+public void prepare() {
+    ensureView();
+    showPrimarySecurityScreen();
+}
+protected void ensureView() {
+    inflateView();//进行bouncer界面的view绘制
+}
+private void showPrimarySecurityScreen() {
+    //调用KeyguardViewController展示密码解锁界面
+    mKeyguardViewController.showPrimarySecurityScreen();
+}
+//KeyguardHostViewController.java
+public void showPrimarySecurityScreen() {
+    mKeyguardSecurityContainerController.showPrimarySecurityScreen(false);
+}//会调用KeyguardSecurityContainerController中的方法进行密码界面相关的判断，比如密码形式等
+```
+
+#### 4.keyguard的亮屏与解锁
+
+- 在keyguard的亮屏和解锁过程中，会经过**onStartedWakingUp() --> onScreenTurningOn() --> onScreenTurnedOn() --> onFinishedWakingUp()**四个生命周期
+
+##### 4.1.PowerManager.weakUp()
+
+- 解锁的第一步要先按电源键。这时就会调用到PowerManager中的weakUp()方法。
+- 在经过一系列的调用后，最终会调用到PhoneWindowManager的startedWakingUp()方法，中间的流程我们就不详细探究了。
+
+```java
+//PowerManager.java
+final IPowerManager mService;
+public void wakeUp(long time, @WakeReason int reason, String details) {
+    mService.wakeUp(time, reason, details, mContext.getOpPackageName());
+}
+```
+
+##### 4.2.PhoneWindowManager.startedWakingUp()
+
+- PhoneWindowManager已经和keyguardService绑定了，在这里会先会调用KeyguardServiceDelegate的onStartedWakingUp()。
+- KeyguardServiceDelegate再调用keyguardService的onStartedWakingUp()。
+
+```java
+@Override
+public void startedWakingUp(@PowerManager.WakeReason int pmWakeReason) {
+    mKeyguardDelegate.onStartedWakingUp(pmWakeReason, mCameraGestureTriggered);
+}
+//keyguardService.java
+@Override
+public void onStartedWakingUp(
+    mKeyguardViewMediator.onStartedWakingUp(cameraGestureTriggered);
+}
+```
+
+##### 4.3.KeyguardViewMediator.onStartedWakingUp()
+
+- keyguardService会再调用KeyguardViewMediator的onStartedWakingUp()，在这里进行唤醒的操作。
+- onStartedWakingUp()阶段会先调用doKeyguardLocked，着这里进行一系列是否要展示keyguard的判断后通过Handler调用handleShow。后续内容见3.3
+
+```java
+public void onStartedWakingUp(boolean cameraGestureTriggered) {
+    doKeyguardLocked(null);//启动keyguard，完成keyguard的绘制
+    notifyStartedWakingUp();
+}
+private void doKeyguardLocked(Bundle options) {
+    ...;//判断是否有开启锁屏、是否有其他APP禁用锁屏、是否是系统用户等
+    showLocked(options);
+}
+private void showLocked(Bundle options) {
+    Message msg = mHandler.obtainMessage(SHOW, options);
+    mHandler.sendMessage(msg);
+}
+```
+
+##### 4.4.KeyguardViewMediator.notifyStartedWakingUp()
+
+- 在执行doKeyguardLocked后会接着执行notifyStartedWakingUp()方法，通过Handler调用handleNotifyStartedWakingUp方法
+- handleNotifyStartedWakingUp()会调用StatusBarKeyguardViewManager的onStartedWakingUp()方法
+- StatusBarKeyguardViewManager会再调用StatusBar进行动画的显示。
+
+```java
+private void notifyStartedWakingUp() {
+    mHandler.sendEmptyMessage(NOTIFY_STARTED_WAKING_UP);
+}
+private void handleNotifyStartedWakingUp() {
+    mKeyguardViewControllerLazy.get().onStartedWakingUp();
+}
+//StatusBarKeyguardViewManager.java
+@Override
+public void onStartedWakingUp() {
+    mStatusBar.getNotificationShadeWindowView().getWindowInsetsController()
+        .setAnimationsDisabled(false);
+}
+```
+
+##### 4.5.KeyguardViewMediator.onScreenTurningOn()
+
+- onScreenTurningOn()会通过Handler调用handleNotifyScreenTurningOn()方法。
+- 到这里就完成了亮屏前的准备工作，接下来就返回到PowerManagerService的updatePowerStateLocked()方法中进行下一步。
+
+```java
+private void handleNotifyScreenTurningOn(IKeyguardDrawnCallback callback) {
+    mKeyguardViewControllerLazy.get().onScreenTurningOn();
+    //在之前的版本中StatusBarKeyguardViewManager是实现了onScreenTurningOn方法的
+    //但是由于在息屏或者开机时就已经绘制好了keyguard，因此不需要再绘制一遍。
+    //在android 10中StatusBarKeyguardViewManager在onScreenTurningOn()和onScreenTurnedOn()阶段就没有进行任何操作了
+}
+```
+
+#### 5.keyguard的息屏流程
+
+- 在keyguard的亮屏和解锁过程中，会经过**onStartedGoingToSleep() --> onScreenTurningOff() --> onScreenTurnedOff() --> onFinishedGoingToSleep()**四个生命周期
+
+##### 5.1.PowerManager.goToSleep()
+
+- 与亮屏时类，也会先按电源键，也就是会调用PowerManager的goToSleep()方法
+- 和亮屏时一样，在经过PhoneWindowManager的中转后会调用到KeyguardService中的onStartedGoingToSleep()
+- KeyguardService依旧会调用KeyguardViewMediator的onStartedGoingToSleep()方法
+
+```java
+public void goToSleep(long time, int reason, int flags) {
+    mService.goToSleep(time, reason, flags);
+}
+//KeyguardService.java
+@Override
+public void onStartedGoingToSleep(@PowerManager.GoToSleepReason int pmSleepReason) {
+    mKeyguardViewMediator.onStartedGoingToSleep(...);
+}
+```
+
+##### 5.2.KeyguardViewMediator.onStartedGoingToSleep()
+
+- 这里主要会调用notifyStartedGoingToSleep()方法，然后通过Handler发送值为NOTIFY_STARTED_GOING_TO_SLEEP的msg
+- Handler会调用handleNotifyStartedGoingToSleep来调用StatusBarKeyguardViewManager的onStartedGoingToSleep()方法。
+
+```java
+public void onStartedGoingToSleep(@WindowManagerPolicyConstants.OffReason int offReason) {
+    notifyStartedGoingToSleep();
+}
+private void notifyStartedGoingToSleep() {
+    mHandler.sendEmptyMessage(NOTIFY_STARTED_GOING_TO_SLEEP);
+}
+private Handler mHandler = new Handler(Looper.myLooper(), null, true /*async*/) {
+    @Override
+    public void handleMessage(Message msg) {
+        switch (msg.what) {
+            case NOTIFY_STARTED_GOING_TO_SLEEP:
+                handleNotifyStartedGoingToSleep();
+                break;
+        }
+    }
+}
+private void handleNotifyStartedGoingToSleep() {
+    mKeyguardViewControllerLazy.get().onStartedGoingToSleep();
+}
+```
+
+##### 5.3.StatusBarKeyguardViewManager.onStartedGoingToSleep()
+
+- 这里会禁用动画
+
+```java
+@Override
+public void onStartedGoingToSleep() {
+    mStatusBar.getNotificationShadeWindowView().getWindowInsetsController()
+        .setAnimationsDisabled(true);
+}
+```
+
+##### 5.4.KeyguardViewMediator.onFinishedGoingToSleep()
+
+- 在完成onStartedGoingToSleep后，继续执行onFinishedGoingToSleep生命周期
+- 之后还会调用reset()方法绘制Keyguard以及Bouncer的绘制。
+
+```java
+public void onFinishedGoingToSleep(...) {
+    notifyFinishedGoingToSleep();
+    maybeHandlePendingLock();
+}
+//StatusBarKeyguardViewManager.java
+public void onFinishedGoingToSleep() {
+    mBouncer.onScreenTurnedOff();
+}
+public void reset(boolean hideBouncerWhenShowing) {
+    showBouncerOrKeyguard(hideBouncerWhenShowing);
+}
+protected void showBouncerOrKeyguard(boolean hideBouncerWhenShowing) {
+    mStatusBar.showKeyguard();
+    mBouncer.prepare();
+}
+```
+
+
 
