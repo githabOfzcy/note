@@ -8,6 +8,34 @@ SystemUI，其实是一个系统级的APP，主要负责系统界面的运行逻
 
 ### SystenUI启动流程
 
+时序图：
+
+```sequence
+title:SystemUI的启动流程
+participant SystemServer as A
+participant SystemUIService as B
+participant SystemUIApplication as C
+participant PhoneWindowManager as D
+participant KeyguardServiceDelegate as E
+participant KeyguadService as F
+participant KeyguardViewMediator as H
+participant ActivityManagerService as G
+
+A->A:startOtherService
+A->A:startSystemUI
+A->B:context.startServiceAsUser
+B->B:onCreate
+B->C:startServicesIfNeeded
+C->C:mService[i].start
+C->H:start
+A->D:onSystemUIStsrted
+D->E:bindService
+E->E:new ServiceConnection
+A->G:systemReady
+E->F:onSystemReady
+F->H:onSystemReady
+```
+
 #### 1.SystemSever中的相关启动
 
 开机时Java层会最先执行SystenSever.java中的程序，SystenSever中有startOtherServices()方法。startOtherServices()中会另起线程来执行mActivityManagerService.systemReady()方法，systemReady()中调用了startSystemUi()。
@@ -278,8 +306,18 @@ public void onSystemUiStarted() {
 - PhoneWindowManager重写了WindowManagerPolicy的onSystemUiStarted()方法，并在其中调用了bindKeyguard()方法，而bindKeyguard()方法调用了KeyguardServiceDelegate中的bindService()方法。
 
 ```java
+@Override
+public void onSystemUiStarted() {
+    bindKeyguard();
+}
+private void bindKeyguard() {
+    ...;
+    //在调用bindService时会传入mContext作为参数
+    mKeyguardDelegate.bindService(mContext);
+}
 mKeyguardDelegate = new KeyguardServiceDelegate(mContext,new StateCallback() {
-    //创建KeyguardServiceDelegate对象，传入的参数包括一个匿名StateCallback对象，需要重写它的onTrustedChanged()和onShowingChanged()方法。
+    //创建KeyguardServiceDelegate对象，传入的参数包括一个匿名StateCallback对象
+    //需要重写它的onTrustedChanged()和onShowingChanged()方法。
     @Override
     public void onTrustedChanged() {
         mWindowManagerFuncs.notifyKeyguardTrustedChanged();
@@ -289,15 +327,6 @@ mKeyguardDelegate = new KeyguardServiceDelegate(mContext,new StateCallback() {
         mWindowManagerFuncs.onKeyguardShowingAndNotOccludedChanged();
     }
 });
-private void bindKeyguard() {
-    ...;
-    //在调用bindService时会传入mContext作为参数
-    mKeyguardDelegate.bindService(mContext);
-}
-@Override
-public void onSystemUiStarted() {
-    bindKeyguard();
-}
 ```
 
 ##### 4.4.KeyguardServiceDelegate中的bindService()方法
@@ -312,9 +341,10 @@ public void bindService(Context context) {
     //也就是说这里创建了systemui下的KeyguardService对应的Component，并绑定了这个服务。
     final ComponentName keyguardComponent = ComponentName.unflattenFromString(
         resources.getString(com.android.internal.R.string.config_keyguardComponent));
+    intent.setComponent(keyguardComponent);
     ...;
     //绑定服务，这里会初始化mKeyguardConnection这个值，mKeyguardConnection中有对KeyguardServiceWrapper的调用
-    if (!context.bindServiceAsUser(intent, mKeyguardConnection,Context.BIND_AUTO_CREATE, mHandler, UserHandle.SYSTEM)) {
+    if (!context.bindServiceAsUser(intent, ...)) {
         //如果无法绑定，需要设置mKeyguardState中对应的值
         mKeyguardState.showing = false;
         ...;
@@ -357,7 +387,7 @@ public void onFinishedWakingUp() {
 
 ##### 4.6.KeyguardService的探究
 
-- 在KeyguardService的绑定方法中，不同的生命周期都会调用KeyguardViewMediator的相应方法。至此完成对Keyguard的绑定，与第一条线合并。
+- 在KeyguardService的绑定方法中，不同的生命周期都会调用KeyguardViewMediator的相应方法。至此完成对Keyguard的绑定。
 
 ```java
 @Override
@@ -432,6 +462,26 @@ public void onScreenTurnedOff() {}//完成息屏
 - 由KeyguardBouncer控制，在KeyguardSecurityContainer中生成Bouncer界面
 
 #### 3.keyguard的开机启动流程
+
+```sequence
+title:Keyguard的开机启动流程
+participant KeyguardViewMediator as A
+participant StatusBarKeyguardViewManager as B
+participant StatusBar as C
+participant KeyguardBouncer as D
+
+A->A:start
+A->A:handleSystemReady
+A->A:handleShow
+A->B:show
+B->B:reset
+B->C:showKeyguard
+C->C:showKeyguardImpl
+B->D:prepare
+C->D:show
+```
+
+
 
 - 开机启动时，keyguard主要进行onSystemReady的生命周期
 
@@ -526,7 +576,7 @@ private void handleShow(Bundle options) {
         ...;//判断是否已经SystenReady
         ...;//一系列keyguard的状态设置
         setShowingLocked(true);//会调用到updateInputRestrictedLocked()方法，进行输入受限状态的更改
-        mKeyguardViewControllerLazy.get().show(options);//调用StatusBarKeyguardViewManager的show()方法,传人null值
+        mKeyguardViewControllerLazy.get().show(options);//调用StatusBarKeyguardViewManager的show()方法
         ..;//StatusBar、PowerManager等的状态更新
         ...;//设置keyguardStateGingAway的值为false
     }
@@ -647,7 +697,7 @@ public void onStartedWakingUp(
 
 ```java
 public void onStartedWakingUp(boolean cameraGestureTriggered) {
-    doKeyguardLocked(null);//启动keyguard，完成keyguard的绘制
+    doKeyguardLocked(null);//启动keyguard
     notifyStartedWakingUp();
 }
 private void doKeyguardLocked(Bundle options) {
@@ -689,7 +739,6 @@ public void onStartedWakingUp() {
 ```java
 private void handleNotifyScreenTurningOn(IKeyguardDrawnCallback callback) {
     mKeyguardViewControllerLazy.get().onScreenTurningOn();
-    //在之前的版本中StatusBarKeyguardViewManager是实现了onScreenTurningOn方法的
     //但是由于在息屏或者开机时就已经绘制好了keyguard，因此不需要再绘制一遍。
     //在android 10中StatusBarKeyguardViewManager在onScreenTurningOn()和onScreenTurnedOn()阶段就没有进行任何操作了
 }
@@ -697,7 +746,7 @@ private void handleNotifyScreenTurningOn(IKeyguardDrawnCallback callback) {
 
 #### 5.keyguard的息屏流程
 
-- 在keyguard的亮屏和解锁过程中，会经过**onStartedGoingToSleep() --> onScreenTurningOff() --> onScreenTurnedOff() --> onFinishedGoingToSleep()**四个生命周期
+- 在keyguard的息屏过程中，会经过**onStartedGoingToSleep() --> onScreenTurningOff() --> onScreenTurnedOff() --> onFinishedGoingToSleep()**四个生命周期
 
 ##### 5.1.PowerManager.goToSleep()
 
