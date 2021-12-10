@@ -408,7 +408,7 @@ private final IKeyguardService.Stub mBinder = new IKeyguardService.Stub() {
 
 
 
-### keyguard分析
+### keyguard流程分析
 
 #### 1.keyguard简介
 
@@ -829,3 +829,187 @@ protected void showBouncerOrKeyguard(boolean hideBouncerWhenShowing) {
 
 
 
+### StatusBar流程分析
+
+#### 1.statusBar简介
+
+##### 1.1.作用范围
+
+statusBar主要包括
+
+#### 2.开机与初始化
+
+##### 2.1.StatusBar.start()
+
+```java
+public void start() {
+    ...;
+    mWindowManager = (WindowManager) mContext.getSystemService(Context.WINDOW_SERVICE);
+    updateDisplaySize();
+
+    mVibrateOnOpening = mContext.getResources().getBoolean(
+            R.bool.config_vibrateOnIconAnimation);
+
+    // start old BaseStatusBar.start().
+    mWindowManagerService = WindowManagerGlobal.getWindowManagerService();
+    mDevicePolicyManager = (DevicePolicyManager) mContext.getSystemService(
+            Context.DEVICE_POLICY_SERVICE);
+
+    mAccessibilityManager = (AccessibilityManager)
+            mContext.getSystemService(Context.ACCESSIBILITY_SERVICE);
+
+    mKeyguardUpdateMonitor.setKeyguardBypassController(mKeyguardBypassController);
+    mBarService = IStatusBarService.Stub.asInterface(
+            ServiceManager.getService(Context.STATUS_BAR_SERVICE));
+
+    mKeyguardManager = (KeyguardManager) mContext.getSystemService(Context.KEYGUARD_SERVICE);
+    mWallpaperSupported =
+            mContext.getSystemService(WallpaperManager.class).isWallpaperSupported();
+
+    // Connect in to the status bar manager service
+    mCommandQueue.addCallback(this);
+
+    // Listen for demo mode changes
+    mDemoModeController.addCallback(this);
+
+    RegisterStatusBarResult result = null;
+    try {
+        result = mBarService.registerStatusBar(mCommandQueue);
+    } catch (RemoteException ex) {
+        ex.rethrowFromSystemServer();
+    }
+
+    createAndAddWindows(result);
+
+    if (mWallpaperSupported) {
+        // Make sure we always have the most current wallpaper info.
+        IntentFilter wallpaperChangedFilter = new IntentFilter(Intent.ACTION_WALLPAPER_CHANGED);
+        mBroadcastDispatcher.registerReceiver(mWallpaperChangedReceiver, wallpaperChangedFilter,
+                null /* handler */, UserHandle.ALL);
+        mWallpaperChangedReceiver.onReceive(mContext, null);
+    } else if (DEBUG) {
+        Log.v(TAG, "start(): no wallpaper service ");
+    }
+
+    // Set up the initial notification state. This needs to happen before CommandQueue.disable()
+    setUpPresenter();
+
+    if (containsType(result.mTransientBarTypes, ITYPE_STATUS_BAR)) {
+        showTransientUnchecked();
+    }
+    onSystemBarAttributesChanged(mDisplayId, result.mAppearance, result.mAppearanceRegions,
+            result.mNavbarColorManagedByIme, result.mBehavior, result.mAppFullscreen);
+
+    // StatusBarManagerService has a back up of IME token and it's restored here.
+    setImeWindowStatus(mDisplayId, result.mImeToken, result.mImeWindowVis,
+            result.mImeBackDisposition, result.mShowImeSwitcher);
+
+    // Set up the initial icon state
+    int numIcons = result.mIcons.size();
+    for (int i = 0; i < numIcons; i++) {
+        mCommandQueue.setIcon(result.mIcons.keyAt(i), result.mIcons.valueAt(i));
+    }
+
+
+    if (DEBUG) {
+        Log.d(TAG, String.format(
+                "init: icons=%d disabled=0x%08x lights=0x%08x imeButton=0x%08x",
+                numIcons,
+                result.mDisabledFlags1,
+                result.mAppearance,
+                result.mImeWindowVis));
+    }
+
+    IntentFilter internalFilter = new IntentFilter();
+    internalFilter.addAction(BANNER_ACTION_CANCEL);
+    internalFilter.addAction(BANNER_ACTION_SETUP);
+    mContext.registerReceiver(mBannerActionBroadcastReceiver, internalFilter, PERMISSION_SELF,
+            null);
+
+    if (mWallpaperSupported) {
+        IWallpaperManager wallpaperManager = IWallpaperManager.Stub.asInterface(
+                ServiceManager.getService(Context.WALLPAPER_SERVICE));
+        try {
+            wallpaperManager.setInAmbientMode(false /* ambientMode */, 0L /* duration */);
+        } catch (RemoteException e) {
+            // Just pass, nothing critical.
+        }
+    }
+
+    // end old BaseStatusBar.start().
+
+    // Lastly, call to the icon policy to install/update all the icons.
+    mIconPolicy.init();
+
+    mKeyguardStateController.addCallback(this);
+    startKeyguard();
+
+    mKeyguardUpdateMonitor.registerCallback(mUpdateCallback);
+    mDozeServiceHost.initialize(
+            this,
+            mStatusBarKeyguardViewManager,
+            mNotificationShadeWindowViewController,
+            mNotificationPanelViewController,
+            mAmbientIndicationContainer);
+    mDozeParameters.addCallback(this::updateLightRevealScrimVisibility);
+
+    mConfigurationController.addCallback(this);
+
+    mBatteryController.observe(mLifecycle, this);
+    mLifecycle.setCurrentState(RESUMED);
+
+    // set the initial view visibility
+    int disabledFlags1 = result.mDisabledFlags1;
+    int disabledFlags2 = result.mDisabledFlags2;
+    mInitController.addPostInitTask(
+            () -> setUpDisableFlags(disabledFlags1, disabledFlags2));
+
+    mFalsingManager.addFalsingBeliefListener(mFalsingBeliefListener);
+
+    mPluginManager.addPluginListener(
+            new PluginListener<OverlayPlugin>() {
+                private ArraySet<OverlayPlugin> mOverlays = new ArraySet<>();
+
+                @Override
+                public void onPluginConnected(OverlayPlugin plugin, Context pluginContext) {
+                    mMainThreadHandler.post(
+                            () -> plugin.setup(getNotificationShadeWindowView(),
+                                    getNavigationBarView(),
+                                    new Callback(plugin), mDozeParameters));
+                }
+
+                @Override
+                public void onPluginDisconnected(OverlayPlugin plugin) {
+                    mMainThreadHandler.post(() -> {
+                        mOverlays.remove(plugin);
+                        mNotificationShadeWindowController
+                                .setForcePluginOpen(mOverlays.size() != 0, this);
+                    });
+                }
+
+                class Callback implements OverlayPlugin.Callback {
+                    private final OverlayPlugin mPlugin;
+
+                    Callback(OverlayPlugin plugin) {
+                        mPlugin = plugin;
+                    }
+
+                    @Override
+                    public void onHoldStatusBarOpenChange() {
+                        if (mPlugin.holdStatusBarOpen()) {
+                            mOverlays.add(mPlugin);
+                        } else {
+                            mOverlays.remove(mPlugin);
+                        }
+                        mMainThreadHandler.post(() -> {
+                            mNotificationShadeWindowController
+                                    .setStateListener(b -> mOverlays.forEach(
+                                            o -> o.setCollapseDesired(b)));
+                            mNotificationShadeWindowController
+                                    .setForcePluginOpen(mOverlays.size() != 0, this);
+                        });
+                    }
+                }
+            }, OverlayPlugin.class, true /* Allow multiple plugins */);
+}
+```
